@@ -747,16 +747,13 @@ void play_music(bool drums_play, bool buzzer_play, bool bargraph_play, int music
       }
       
 
-
       if (buzzer_play != 1) { // if buzzer is not selected, turn off buzzer
         // ICR1=0;OCR1C=0;TCNT1=0;        
         mstate = 0;
       }
-     
-      
       
 
-      if (drums_play == 1) // if drums are selected, play drums
+      if (drums_play == 1)  // if drums are selected, play drums
       {
          //drum_music1(); // run drum sequence 1
          int z;
