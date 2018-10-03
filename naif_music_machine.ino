@@ -729,7 +729,6 @@ void play_music(bool drums_play, bool buzzer_play, bool bargraph_play, int music
     else if (mstate == 2) {
       mstate = 2; // wait for rest to finish
   
-
       if((long)timer0_millis-mTimeout>=0) {
         if (mToneIdx >= muLen) {
           mToneIdx = 0;
