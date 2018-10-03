@@ -309,7 +309,7 @@ void setup() {
    
     OCR3A = 93;  // Drive SERVO1  to Neutral mid-point
     ICR3 = 1250; // Load 1250 for TOP
-    TCNT3 = 0;   // Load 0 for BOT
+    TCNT3 = 0;   // Bottom=0
     // --> tm3,ch A, pin 5. pinout oc3a pe3 pin 5
     // --> we can do extra also on oc4a
     //--E N D--
@@ -324,7 +324,7 @@ void setup() {
     
     // PUSHBUTTON
     //PORTL &= 0xF0;
-    DDRL &= 0xF0;  // set PL0, PL1 as input
+    DDRL &= 0xF0;  // set PL0, PL1 as input. This turns off 4 bits.
     
 }
 
