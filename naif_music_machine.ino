@@ -743,7 +743,6 @@ void play_music(bool drums_play, bool buzzer_play, bool bargraph_play, int music
         mstate = 1;
         
         mTimeout = (long)timer0_millis + noteDuration*1.3;
-        
       }
       
 
