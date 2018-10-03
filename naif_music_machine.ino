@@ -283,6 +283,7 @@ void setup() {
     
     
     //S E R V O - S E T U P    <-- pin 7 and 8
+    // we actually need only one
     DDRH |= (1<<DDH4) | (1<<DDH5);  //setting pin#7 and pin#8 or PH4 and PH5 as timmer output for 2 servos
                                     // <-- OC4C and OC4B
     TCCR4A = 0;
