@@ -1,0 +1,256 @@
+#include "HX711.h"
+#define Show_Serial_Messages    1
+
+/* 
+    There are 2 dogs:    small 100g to 400g and large 600g to 900g
+    Wait time before feeding:    small=50sec, large=90sec
+    Food weight:    small=10g large=30g
+*/
+int DOG1_WAIT_TIME = 50;
+int DOG2_WAIT_TIME = 90;
+float DOG1_WEIGHT_MINIMUM = 0.1;
+float DOG1_WEIGHT_MAXIMUM = 0.4;
+float DOG2_WEIGHT_MINIMUM = 0.6;
+float DOG2_WEIGHT_MAXIMUM = 0.9;
+float DOG1_FOOD_WEIGHT    = 0.01;
+float DOG2_FOOD_WEIGHT        = 0.03;
+
+/****************************************
+
+Mapping of arduino pins:
+  3 - pin for buzzer
+  8 - for servo driving signal
+  13 - used as time second elapsed counter
+  A1 - analog 1 pin is used for indicating that dog is present and servo can run to feed dog
+
+Pins for load cells ********************/
+#define DOUT_FOOD       14
+#define CLK_FOOD        15
+#define DOUT_DOG        5
+#define CLK_DOG         4
+
+// ****************************************************
+//Calibration factor for the load cells
+float scaleval_food = -800000;
+float scaleval_dog    = -800000;
+// ****************************************************
+
+
+/* seconds elapsed */
+volatile unsigned long int time_seconds=0;
+
+
+unsigned long int lastTimeDog1 = time_seconds, lastTimeDog2 = time_seconds;
+int statusBuzzer = 0;
+unsigned long int lastCountBuzzer = 0;
+unsigned long int dogCounterValue = 0;
+int present_Dog1, present_Dog2 = 0;    // for tracking if the dog was there
+float weight_food;
+float dogScaleValue;
+HX711 hx711_load_cell_food(DOUT_FOOD, CLK_FOOD);
+HX711 hx711_load_cell_dog(DOUT_DOG,CLK_DOG);
+
+//Output Compare Match Interrupt
+ISR(TIMER1_COMPC_vect) { 
+    time_seconds ++;
+    TCNT1 = 0xC2F7; // set TCNT1 to hex C2F7
+}
+
+//=============================================================================================
+//                                                 SETUP
+//=============================================================================================
+void setup() {
+    #ifdef Show_Serial_Messages
+    Serial.begin(9600);
+    #endif
+    
+    // setup timer 3 channel C OC3C PE5 to drive buzzer
+    DDRE |= (1 << DDB5);                                // set PE5 as output
+    TCCR3A = (1 << COM3C1)|(1 << WGM31);    // clear OC13C on compare match
+    TCCR3B = (1 << WGM33)|(1 << WGM32)|(1 << CS32); // set mode 14 FAST PWM prescalar = CLK/256
+    play_sound_buzzer(0);
+    // finish buzzer setup
+    
+    // Make PF0 an output pin for LED and initially set it low
+    // We turn this on when dog is present
+    DDRF = (1 << DDF1); 
+    PORTF &= 0xFD;
+
+    hx711_load_cell_food.set_scale(scaleval_food); //Calibration Factor obtained from first sketch
+    hx711_load_cell_food.tare();                                     //Reset the hx711_load_cell_food to 0
+    hx711_load_cell_dog.set_scale(scaleval_dog);     //Calibration Factor obtained from first sketch
+    hx711_load_cell_dog.tare();                                        //Reset the hx711_load_cell_dog to 0
+    
+    // setup a timer interrupt on timer 1 channel C every half second
+    DDRB = (1 << DDB7); //Make PB7 an output digital pin 
+    cli();    // disable interrupts 
+    TCCR1A = (1 << COM1C0); // Use normal mode, on compare match toggle OC1C
+    TCCR1B = (1 << CS12) | (1 << CS10); // set prescaler CLKIO/1024 for T/C1
+    TCCR1C = 0;                                         // set TCCR1C to zero
+    TIMSK1 = (1  <<  OCIE1C); // set output compare match interrupt
+    TCNT1 = 0xC2F7; // set TCNT1 to hex C2F7
+    OCR1C = 0xFFFF; // set OCR1C to FFFF
+    sei();    // restore interrupts
+    // Finished setup timer interrupt
+    
+    // Setup the servo to use pin 8. This is OC4C
+    DDRH |= (1 << DDH5);    // set Pin H5 at pin 8 as output
+    TCCR4A = 0;
+    TCCR4B = 0;
+    TCCR4A = (1 << COM4C1) | (1 << WGM41);                         // on compare match, clear OC1x
+    TCCR4B = (1 << WGM43) | (1 << WGM42) | (1 << CS42);    // use mode 14 FAST PWM mode. Use prescalar CLK/256 
+    OCR4C = 0;     // set the duty cycle
+    ICR4 = 1250; // set the TOP value 50Hz or 20ms
+    TCNT4 = 0;     // set the BOTTOM value
+    // Finished servo setup
+}
+
+void play_sound_buzzer(int value1) {
+    TCNT3=0;
+    OCR3C=value1 / 2;
+    ICR3=value1;
+}
+
+// define the main loop function
+void loop() {
+    weight_food = hx711_load_cell_food.get_units();
+    dogScaleValue = hx711_load_cell_dog.get_units();
+    #ifdef Show_Serial_Messages
+    Serial.print("food=");
+    Serial.print(weight_food, 3);     // print 3 decimal
+    Serial.print(" ++ dog=");
+    Serial.print(dogScaleValue, 3);     // print 3 decimals
+    Serial.print(" ++ time_seconds= ");
+    Serial.print(time_seconds);
+    Serial.print(" ++    lastTimeDog1= ");
+    Serial.print(lastTimeDog1);
+    Serial.print(" ++    present_Dog= ");
+    Serial.print(present_Dog1);
+    Serial.print(" , ");
+    Serial.print(present_Dog2);
+    Serial.print(" ++    OCR4C: ");
+    Serial.println(OCR4C);
+    #endif
+    
+    // check if time to feed first dog
+    if ( (time_seconds - lastTimeDog1 >= DOG1_WAIT_TIME ) && !present_Dog2) {    
+        // emit buzzer sound for dog to come 
+        if ( !present_Dog1 ) {
+            if (statusBuzzer == 0x01) {
+                // no need to change buzzer sound until enough time has passed
+                if (time_seconds-lastCountBuzzer > 0) statusBuzzer = 0;
+            } else if (statusBuzzer == 0x00)    {
+                // change the sound played by buzzer
+                play_sound_buzzer( 50+ 200*((time_seconds-DOG1_WAIT_TIME-lastTimeDog1)%2) );
+                statusBuzzer = 1;
+                lastCountBuzzer = time_seconds;
+            }
+        } 
+        
+        // Is the dog present
+        if ( DOG1_WEIGHT_MINIMUM <= dogScaleValue && dogScaleValue <= DOG1_WEIGHT_MAXIMUM) {
+            // reset the buzzer
+            play_sound_buzzer(0);
+            present_Dog1 = 1;
+        }
+        
+        if (present_Dog1 ) {
+            // servo control to release food
+            PORTF |= 0x02;    // turn on LED_DOG_ISHERE
+            switch(present_Dog1) {
+                case 1:
+                    OCR4C = 156;
+                    present_Dog1 = 2;
+                    dogCounterValue = time_seconds;
+                    break;
+                case 2:
+                    if (time_seconds - dogCounterValue > 2) {
+                        OCR4C = 0;
+                        present_Dog1 = 3;
+                        dogCounterValue = time_seconds;
+                    }
+                    break;
+                case 3:
+                    if (time_seconds - dogCounterValue > 2) {
+                        OCR4C = 156;
+                        present_Dog1 = 2;
+                        dogCounterValue = time_seconds;
+                    }
+            }
+            
+            if (weight_food >= DOG1_FOOD_WEIGHT) {
+                play_sound_buzzer( 0 );
+                OCR4C = 0;    // update the servo
+                lastTimeDog1 = time_seconds;    // update last time value
+                present_Dog1 = 0;
+            }
+        }
+        
+        // if five seconds have passed then stop calling the dog
+        if (((time_seconds - lastTimeDog1-DOG1_WAIT_TIME)> 5 ) && !present_Dog1) {
+            play_sound_buzzer( 0 );
+            lastTimeDog1 = time_seconds;    // update last time value
+        }
+    }
+    else if (time_seconds - lastTimeDog2 >= DOG2_WAIT_TIME) {    // if true, then time to feed dog2
+        // emit buzzer sound for dog to come 
+        if ( !present_Dog2 ) {
+            if (statusBuzzer == 0x00)    {
+                play_sound_buzzer((9-(time_seconds - lastTimeDog2-DOG2_WAIT_TIME) )%3 *50 + 100);
+                statusBuzzer = 1;
+                lastCountBuzzer = time_seconds;
+            } else if (statusBuzzer == 0x01) {
+                if (time_seconds-lastCountBuzzer > 0) statusBuzzer = 0;
+            }         
+        } 
+        
+        // check if dog is present
+        if ( dogScaleValue >= DOG2_WEIGHT_MINIMUM && dogScaleValue <= DOG2_WEIGHT_MAXIMUM) {
+            present_Dog2 = 1;
+            play_sound_buzzer(0);
+        }
+        
+        if (present_Dog2 ) {
+            PORTF |= 0x02;    // turn on LED_DOG_ISHERE
+            // servo control to release food
+            switch ( present_Dog2) {
+                case 1:
+                    OCR4C = 156;
+                    present_Dog2 = 2;
+                    dogCounterValue = time_seconds;
+                    break;
+                case 2:
+                    if (time_seconds - dogCounterValue > 2) {  // <-- timing of servo = 2 sec
+                        OCR4C = 0;
+                        present_Dog2 = 3;
+                        dogCounterValue = time_seconds;
+                    }
+                    break;
+                case 3:
+                    if (time_seconds - dogCounterValue > 2) {   // <-- timing of servo = 2 sec
+                        OCR4C = 156;
+                        present_Dog2 = 2;
+                        dogCounterValue = time_seconds;
+                    }                
+            }
+            
+            if (weight_food >= DOG2_FOOD_WEIGHT) {
+                play_sound_buzzer(0);
+                OCR4C = 0;    // update the servo
+                lastTimeDog2 = time_seconds;    // update last time value
+                present_Dog2 = 0;
+            }
+        }
+        
+        // if five seconds have passed then stop calling the dog
+        if (((time_seconds - lastTimeDog2-DOG2_WAIT_TIME)> 5) && !present_Dog2    ) {
+            play_sound_buzzer(0);
+            lastTimeDog2 = time_seconds;    // update last time value
+        }
+    } else {
+        play_sound_buzzer(0);
+        PORTF &= 0xFD;    // turn off LED_DOG_ISHERE
+        OCR4C = 0; // move servo to start position
+    }
+}
+
