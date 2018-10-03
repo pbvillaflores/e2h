@@ -324,7 +324,7 @@ void setup() {
     
     // PUSHBUTTON
     //PORTL &= 0xF0;
-    DDRL &= 0xF0;  // set PL0, PL1 as input. This turns off 4 bits.
+    DDRL &= 0xFC;  // set PL0, PL1 as input. This turns off 2 bits.
     
 }
 
