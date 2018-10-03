@@ -1,6 +1,8 @@
 #define MUSIC_STATES 5 
 #define SERVOMIN 44
 #define SERVOMAX 156
+
+// using this extern declaration, we have access to a millisecond counter
 extern volatile unsigned long timer0_millis;
 
 /*************************************************
@@ -611,8 +613,6 @@ void drum_music1()
 {
   int z;
 }
-
-
 
 
 void play_music(bool drums_play, bool buzzer_play, bool bargraph_play, int music_idx )
